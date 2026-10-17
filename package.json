@@ -1,0 +1,16 @@
+{
+  "name": "mini-friend-surprise-bot",
+  "version": "1.0.0",
+  "description": "A playful, opt-in-friendly Discord surprise sequence bot.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "discord.js": "^14.19.3",
+    "dotenv": "^16.4.7"
+  }
+}
