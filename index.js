@@ -1,6 +1,6 @@
 require("dotenv").config();
 
-const { Client, GatewayIntentBits, Partials } = require("discord.js");
+const { Client, GatewayIntentBits, Partials, REST, Routes } = require("discord.js");
 const messages = require("./messages.json");
 
 const required = ["DISCORD_TOKEN", "OWNER_ID", "TARGET_USER_ID", "CHANNEL_ID"];
@@ -20,30 +20,75 @@ let nextMessageIndex = 0;
 let sequenceFinished = false;
 let activeGuildId = null;
 
-client.once("ready", () => {
+async function getTargetChannel() {
+  const channel = await client.channels.fetch(process.env.CHANNEL_ID).catch(() => null);
+  if (!channel || !channel.isTextBased() || !channel.guild) {
+    console.error("CHANNEL_ID must point to a text channel the bot can access.");
+    return null;
+  }
+  return channel;
+}
+
+async function startSequence(channel) {
+  sequenceStarted = true;
+  sequenceFinished = false;
+  nextMessageIndex = 0;
+  activeGuildId = channel.guild.id;
+
+  await channel.send({
+    content: "🕵️ **A tiny friend-profile mystery has arrived!**\nThis is a playful surprise made from harmless favorites and hobbies—not private or identifying information.\nOwner, send any message in this server (even just `.`) to reveal the next clue, or use `/start` to restart the sequence.",
+    allowedMentions: { parse: [] },
+  });
+}
+
+client.once("ready", async () => {
   console.log("Logged in as " + client.user.tag);
   console.log("Waiting for the target user to join the server...");
+
+  const channel = await getTargetChannel();
+  if (!channel) return;
+
+  try {
+    const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
+    await rest.put(Routes.applicationGuildCommands(client.user.id, channel.guild.id), {
+      body: [{
+        name: "start",
+        description: "Manually start or restart the friend-profile mystery",
+      }],
+    });
+    console.log("Registered /start in guild " + channel.guild.id);
+  } catch (error) {
+    console.error("Could not register /start. Check the bot's application permissions.");
+    console.error(error.message);
+  }
 });
 
 client.on("guildMemberAdd", async (member) => {
   if (member.user.bot || member.id !== process.env.TARGET_USER_ID) return;
 
-  const channel = await client.channels.fetch(process.env.CHANNEL_ID).catch(() => null);
-  if (!channel || !channel.isTextBased() || !channel.guild) {
-    console.error("CHANNEL_ID must point to a text channel the bot can access.");
+  const channel = await getTargetChannel();
+  if (!channel || member.guild.id !== channel.guild.id) return;
+
+  await startSequence(channel);
+});
+
+client.on("interactionCreate", async (interaction) => {
+  if (!interaction.isChatInputCommand() || interaction.commandName !== "start") return;
+
+  if (interaction.user.id !== process.env.OWNER_ID) {
+    await interaction.reply({ content: "Only the bot owner can use this command.", ephemeral: true });
     return;
   }
-  if (member.guild.id !== channel.guild.id) return;
 
-  sequenceStarted = true;
-  sequenceFinished = false;
-  nextMessageIndex = 0;
-  activeGuildId = member.guild.id;
+  const channel = await getTargetChannel();
+  if (!channel || interaction.guildId !== channel.guild.id) {
+    await interaction.reply({ content: "The configured bot channel isn't available in this server.", ephemeral: true });
+    return;
+  }
 
-  await channel.send({
-    content: "🕵️ **A tiny friend-profile mystery has arrived!**\nThis is a playful surprise made from harmless favorites and hobbies—not private or identifying information.\nOwner, send any message in this server (even just `.`) to reveal the next clue.",
-    allowedMentions: { parse: [] },
-  });
+  await interaction.deferReply({ ephemeral: true });
+  await startSequence(channel);
+  await interaction.editReply("✅ Mystery started! Send any message to reveal the first clue.");
 });
 
 client.on("messageCreate", async (message) => {
@@ -51,11 +96,8 @@ client.on("messageCreate", async (message) => {
   if (!message.guild || message.guild.id !== activeGuildId) return;
   if (!sequenceStarted || sequenceFinished) return;
 
-  const channel = await client.channels.fetch(process.env.CHANNEL_ID).catch(() => null);
-  if (!channel || !channel.isTextBased()) {
-    console.error("Could not access CHANNEL_ID.");
-    return;
-  }
+  const channel = await getTargetChannel();
+  if (!channel) return;
 
   const item = messages[nextMessageIndex];
   if (!item) {
