@@ -43,23 +43,32 @@ async function startSequence(channel) {
 
 client.once("ready", async () => {
   console.log("Logged in as " + client.user.tag);
-  console.log("Waiting for the target user to join the server...");
 
-  const channel = await getTargetChannel();
-  if (!channel) return;
-
+  // Register /start independently of CHANNEL_ID so a channel misconfiguration
+  // cannot prevent the slash command from appearing.
   try {
     const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
-    await rest.put(Routes.applicationGuildCommands(client.user.id, channel.guild.id), {
-      body: [{
-        name: "start",
-        description: "Manually start or restart the friend-profile mystery",
-      }],
-    });
-    console.log("Registered /start in guild " + channel.guild.id);
+    const command = [{
+      name: "start",
+      description: "Manually start or restart the friend-profile mystery",
+    }];
+
+    for (const [guildId] of client.guilds.cache) {
+      await rest.put(Routes.applicationGuildCommands(client.user.id, guildId), {
+        body: command,
+      });
+      console.log("Registered /start in guild " + guildId);
+    }
   } catch (error) {
     console.error("Could not register /start. Check the bot's application permissions.");
     console.error(error.message);
+  }
+
+  const channel = await getTargetChannel();
+  if (channel) {
+    console.log("Waiting for the target user to join the server...");
+  } else {
+    console.error("Fix CHANNEL_ID in Railway Variables. Use the ID of the text channel where the mystery should appear.");
   }
 });
 
@@ -82,7 +91,7 @@ client.on("interactionCreate", async (interaction) => {
 
   const channel = await getTargetChannel();
   if (!channel || interaction.guildId !== channel.guild.id) {
-    await interaction.reply({ content: "The configured bot channel isn't available in this server.", ephemeral: true });
+    await interaction.reply({ content: "The configured bot channel isn't available in this server. Please fix CHANNEL_ID in Railway Variables.", ephemeral: true });
     return;
   }
 
